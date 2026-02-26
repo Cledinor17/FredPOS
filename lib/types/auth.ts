@@ -2,6 +2,8 @@ export type AuthUser = {
   id?: number | string;
   name?: string;
   email?: string;
+  avatar_path?: string | null;
+  avatar_url?: string | null;
   [key: string]: unknown;
 };
 

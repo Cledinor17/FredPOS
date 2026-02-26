@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { logout } from "../lib/authApi";
+import { getBusinessSettings } from "../lib/businessApi";
 import { useAuth } from "../context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useParams, usePathname } from "next/navigation";
@@ -9,22 +11,21 @@ import {
   LayoutDashboard,
   ShoppingCart,
   Receipt,
-  Undo2,
   Package,
-  Boxes,
-  Barcode,
+  Tags,
+  Warehouse,
   Users,
-  UserCircle2,
+  User,
   Truck,
   FileText,
-  CreditCard,
   Landmark,
   BarChart3,
+  CalendarDays,
   Settings,
   ShieldCheck,
-  HelpCircle,
   ChevronDown,
   Store,
+  Building2,
 } from "lucide-react";
 
 type NavItem = { label: string; href: (b: string) => string; icon?: any; badge?: string };
@@ -44,20 +45,25 @@ function NavLink({ item, business }: { item: NavItem; business: string }) {
     <Link
       href={href}
       className={cx(
-        "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition",
+        "group flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition-all duration-200 hover:translate-x-0.5",
         active
-          ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
-          : "text-slate-700 hover:bg-slate-100"
+          ? "bg-[#0a4d8f] text-white border-[#083a6d] shadow-md"
+          : "border-transparent text-slate-700 hover:border-[#0a4d8f] hover:bg-[#0d63b8] hover:text-white hover:shadow-sm"
       )}
     >
       {Icon ? (
-        <Icon className={cx("h-4 w-4", active ? "text-indigo-700" : "text-slate-500 group-hover:text-slate-700")} />
+        <Icon
+          className={cx(
+            "h-4 w-4 transition-colors",
+            active ? "text-white" : "text-slate-500 group-hover:text-orange-200"
+          )}
+        />
       ) : null}
 
       <span className="font-medium">{item.label}</span>
 
       {item.badge ? (
-        <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-slate-900 text-white">
+        <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-[#f59e0b] text-white">
           {item.badge}
         </span>
       ) : null}
@@ -69,19 +75,29 @@ function Section({
   title,
   icon: Icon,
   children,
-  defaultOpen = true,
+  defaultOpen = false,
 }: {
   title: string;
   icon: any;
   children: React.ReactNode;
   defaultOpen?: boolean;
 }) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  useEffect(() => {
+    setOpen(defaultOpen);
+  }, [defaultOpen]);
+
   return (
-    <details className="group" open={defaultOpen}>
-      <summary className="list-none cursor-pointer select-none flex items-center gap-2 px-2 py-2 text-xs font-semibold text-slate-500">
-        <Icon className="h-4 w-4 text-slate-400" />
+    <details
+      className="group"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="list-none cursor-pointer select-none flex items-center gap-2 px-2 py-2 text-xs font-semibold text-slate-500 transition-colors hover:text-[#0d63b8]">
+        <Icon className="h-4 w-4 text-slate-400 transition-colors group-hover:text-[#f59e0b]" />
         <span className="uppercase tracking-wide">{title}</span>
-        <ChevronDown className="ml-auto h-4 w-4 text-slate-400 transition group-open:rotate-180" />
+        <ChevronDown className="ml-auto h-4 w-4 text-slate-400 transition group-open:rotate-180 group-hover:text-[#0d63b8]" />
       </summary>
       <div className="space-y-1 px-2 pb-2">{children}</div>
     </details>
@@ -107,7 +123,58 @@ async function handleLogout() {
   }
 }
   const params = useParams<{ business: string }>();
+  const pathname = usePathname();
   const business = params?.business || "";
+  const [businessLogoUrl, setBusinessLogoUrl] = useState("");
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setLogoLoadFailed(false);
+
+    if (!business) {
+      setBusinessLogoUrl("");
+      return;
+    }
+
+    let mounted = true;
+
+    async function loadBusinessLogo() {
+      try {
+        const data = await getBusinessSettings(business);
+        if (!mounted) return;
+
+        const raw = (data.logo_url || data.logo_path || "").trim();
+        if (!raw) {
+          setBusinessLogoUrl("");
+          return;
+        }
+
+        if (
+          raw.startsWith("http://") ||
+          raw.startsWith("https://") ||
+          raw.startsWith("data:") ||
+          raw.startsWith("blob:")
+        ) {
+          setBusinessLogoUrl(raw);
+          return;
+        }
+
+        const normalized = raw.replace(/^\/+/, "");
+        const relative = normalized.startsWith("storage/")
+          ? normalized
+          : `storage/${normalized}`;
+        const base = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
+        setBusinessLogoUrl(base ? `${base}/${relative}` : `/${relative}`);
+      } catch {
+        if (mounted) setBusinessLogoUrl("");
+      }
+    }
+
+    void loadBusinessLogo();
+    return () => {
+      mounted = false;
+    };
+  }, [business]);
 
   // Menu POS (complet + groupé)
   const dashboard: NavItem[] = [
@@ -117,56 +184,69 @@ async function handleLogout() {
   const sales: NavItem[] = [
     { label: "Nouvelle vente (POS)", href: (b) => `/${b}/pos`, icon: ShoppingCart, badge: "Rapide" },
     { label: "Tickets / Ventes", href: (b) => `/${b}/sales`, icon: Receipt },
-    { label: "Retours & Remboursements", href: (b) => `/${b}/returns`, icon: Undo2 },
   ];
 
   const products: NavItem[] = [
     { label: "Catalogue produits", href: (b) => `/${b}/products`, icon: Package },
-    { label: "Catégories", href: (b) => `/${b}/categories`, icon: Boxes },
-    { label: "Stock & Inventaire", href: (b) => `/${b}/inventory`, icon: Boxes },
-    { label: "Codes-barres / Étiquettes", href: (b) => `/${b}/labels`, icon: Barcode },
+    { label: "Catégories", href: (b) => `/${b}/categories`, icon: Tags },
+    { label: "Stock & Inventaire", href: (b) => `/${b}/inventory`, icon: Warehouse },
   ];
 
   const people: NavItem[] = [
     { label: "Clients", href: (b) => `/${b}/customers`, icon: Users },
-    { label: "Fidélité", href: (b) => `/${b}/loyalty`, icon: UserCircle2 },
     { label: "Fournisseurs", href: (b) => `/${b}/suppliers`, icon: Truck },
   ];
 
   const docs: NavItem[] = [
     { label: "Devis / Documents", href: (b) => `/${b}/documents`, icon: FileText },
-    { label: "Proformas", href: (b) => `/${b}/proformas`, icon: FileText },
-    { label: "Factures", href: (b) => `/${b}/invoices`, icon: FileText },
+    { label: "Factures", href: (b) => `/${b}/invoices`, icon: Receipt },
   ];
 
   const finance: NavItem[] = [
-    { label: "Paiements", href: (b) => `/${b}/payments`, icon: CreditCard },
-    { label: "Caisse (mouvements)", href: (b) => `/${b}/cash-drawer`, icon: CreditCard },
     { label: "Comptabilité", href: (b) => `/${b}/accounting`, icon: Landmark },
-    { label: "Périodes comptables", href: (b) => `/${b}/accounting/periods`, icon: Landmark },
+    { label: "Périodes comptables", href: (b) => `/${b}/accounting/periods`, icon: CalendarDays },
   ];
 
   const reports: NavItem[] = [
     { label: "Rapports ventes", href: (b) => `/${b}/reports/sales`, icon: BarChart3 },
-    { label: "Rapports stock", href: (b) => `/${b}/reports/inventory`, icon: BarChart3 },
-    { label: "Créances clients (AR)", href: (b) => `/${b}/reports/ar`, icon: BarChart3 },
-    { label: "Bilan & Résultat", href: (b) => `/${b}/reports/finance`, icon: BarChart3 },
+    { label: "Rapports stock", href: (b) => `/${b}/reports/inventory`, icon: Warehouse },
+    { label: "Créances clients (AR)", href: (b) => `/${b}/reports/ar`, icon: Receipt },
+    { label: "Bilan & Résultat", href: (b) => `/${b}/reports/finance`, icon: Landmark },
   ];
 
   const admin: NavItem[] = [
-    { label: "Paramètres", href: (b) => `/${b}/settings`, icon: Settings },
-    { label: "Utilisateurs & Rôles", href: (b) => `/${b}/settings/users`, icon: ShieldCheck },
+    { label: "MY Business", href: (b) => `/${b}/business`, icon: Building2 },
+    { label: "Utilisateurs", href: (b) => `/${b}/users`, icon: Users },
+    { label: "Employes", href: (b) => `/${b}/employees`, icon: User },
+    { label: "Parametres", href: (b) => `/${b}/settings`, icon: Settings },
     { label: "Audit & Sécurité", href: (b) => `/${b}/audit`, icon: ShieldCheck },
-    { label: "Aide", href: (b) => `/${b}/help`, icon: HelpCircle },
   ];
+
+  function isActiveItem(item: NavItem): boolean {
+    const href = item.href(business);
+    return pathname === href || pathname?.startsWith(`${href}/`);
+  }
+
+  function isActiveGroup(items: NavItem[]): boolean {
+    return items.some(isActiveItem);
+  }
 
   return (
     <div className="h-full flex flex-col">
       {/* Header sidebar */}
       <div className="px-4 py-4">
         <div className="flex items-center gap-2">
-          <div className="h-10 w-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-sm">
-            <Store className="h-5 w-5" />
+          <div className="h-10 w-10 rounded-2xl overflow-hidden bg-gradient-to-br from-[#0d63b8] to-[#f59e0b] text-white flex items-center justify-center shadow-sm">
+            {businessLogoUrl && !logoLoadFailed ? (
+              <img
+                src={businessLogoUrl}
+                alt={`Logo ${business ? business.toUpperCase() : "Business"}`}
+                className="h-full w-full object-cover"
+                onError={() => setLogoLoadFailed(true)}
+              />
+            ) : (
+              <Store className="h-5 w-5" />
+            )}
           </div>
           <div className="leading-tight">
             <div className="font-extrabold text-slate-900 text-base">
@@ -203,43 +283,47 @@ async function handleLogout() {
             ))}
           </div>
 
-          <Section title="Ventes" icon={ShoppingCart} defaultOpen>
+          <Section title="Ventes" icon={ShoppingCart} defaultOpen={isActiveGroup(sales)}>
             {sales.map((it) => (
               <NavLink key={it.label} item={it} business={business} />
             ))}
           </Section>
 
-          <Section title="Produits" icon={Package} defaultOpen>
+          <Section title="Produits" icon={Package} defaultOpen={isActiveGroup(products)}>
             {products.map((it) => (
               <NavLink key={it.label} item={it} business={business} />
             ))}
           </Section>
 
-          <Section title="Clients & Fournisseurs" icon={Users} defaultOpen>
+          <Section
+            title="Clients & Fournisseurs"
+            icon={Users}
+            defaultOpen={isActiveGroup(people)}
+          >
             {people.map((it) => (
               <NavLink key={it.label} item={it} business={business} />
             ))}
           </Section>
 
-          <Section title="Documents" icon={FileText} defaultOpen>
+          <Section title="Documents" icon={FileText} defaultOpen={isActiveGroup(docs)}>
             {docs.map((it) => (
               <NavLink key={it.label} item={it} business={business} />
             ))}
           </Section>
 
-          <Section title="Finance" icon={Landmark} defaultOpen={false}>
+          <Section title="Finance" icon={Landmark} defaultOpen={isActiveGroup(finance)}>
             {finance.map((it) => (
               <NavLink key={it.label} item={it} business={business} />
             ))}
           </Section>
 
-          <Section title="Rapports" icon={BarChart3} defaultOpen={false}>
+          <Section title="Rapports" icon={BarChart3} defaultOpen={isActiveGroup(reports)}>
             {reports.map((it) => (
               <NavLink key={it.label} item={it} business={business} />
             ))}
           </Section>
 
-          <Section title="Administration" icon={Settings} defaultOpen={false}>
+          <Section title="Administration" icon={Settings} defaultOpen={isActiveGroup(admin)}>
             {admin.map((it) => (
               <NavLink key={it.label} item={it} business={business} />
             ))}
@@ -248,12 +332,13 @@ async function handleLogout() {
       </div>
 
       {/* Footer */}
-      <div className="border-t p-3 text-xs text-slate-500">
+      <div className="p-3 text-xs text-slate-500">
         <div className="flex items-center justify-between">
           <span>POS System</span>
-          <span className="font-semibold text-indigo-700">v1</span>
+          <span className="font-semibold text-[#0d63b8]">v1</span>
         </div>
       </div>
     </div>
   );
 }
+

@@ -57,6 +57,7 @@ export type CreateProductInput = {
   taxRate?: number;
   status: ProductStatus;
   description?: string;
+  imageFile?: File | null;
 };
 
 export type UpdateProductInput = Partial<CreateProductInput> & {
@@ -128,7 +129,10 @@ function toNumber(value: unknown, fallback = 0): number {
 }
 
 function toString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "bigint") return value.toString();
+  return fallback;
 }
 
 function toId(value: unknown): Id | null {
@@ -337,6 +341,21 @@ function productPayload(input: CreateProductInput | UpdateProductInput): Dict {
   return payload;
 }
 
+function payloadToFormData(payload: Dict): FormData {
+  const formData = new FormData();
+
+  for (const [key, value] of Object.entries(payload)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === "boolean") {
+      formData.append(key, value ? "1" : "0");
+      continue;
+    }
+    formData.append(key, String(value));
+  }
+
+  return formData;
+}
+
 export async function getCategories(business: string): Promise<CatalogCategory[]> {
   const raw = await apiFetch<unknown>(`${businessBasePath(business)}/categories`);
   return extractCollection<unknown>(raw).map(normalizeCategory);
@@ -376,8 +395,20 @@ export async function deleteCategory(business: string, categoryId: Id): Promise<
   });
 }
 
-export async function getProducts(business: string): Promise<CatalogProduct[]> {
-  const raw = await apiFetch<unknown>(`${businessBasePath(business)}/products`);
+export async function getProducts(
+  business: string,
+  options: { all?: boolean; perPage?: number } = {}
+): Promise<CatalogProduct[]> {
+  const qp = new URLSearchParams();
+  if (options.all) qp.set("all", "1");
+  if (options.perPage && options.perPage > 0) qp.set("per_page", String(options.perPage));
+
+  const query = qp.toString();
+  const path = query.length > 0
+    ? `${businessBasePath(business)}/products?${query}`
+    : `${businessBasePath(business)}/products`;
+
+  const raw = await apiFetch<unknown>(path);
   return extractCollection<unknown>(raw).map(normalizeProduct);
 }
 
@@ -385,10 +416,23 @@ export async function createProduct(
   business: string,
   input: CreateProductInput
 ): Promise<CatalogProduct> {
-  const raw = await apiFetch<unknown>(`${businessBasePath(business)}/products`, {
-    method: "POST",
-    json: productPayload(input),
-  });
+  const payload = productPayload(input);
+  let raw: unknown;
+
+  if (input.imageFile instanceof File) {
+    const formData = payloadToFormData(payload);
+    formData.append("image", input.imageFile);
+    raw = await apiFetch<unknown>(`${businessBasePath(business)}/products`, {
+      method: "POST",
+      body: formData,
+    });
+  } else {
+    raw = await apiFetch<unknown>(`${businessBasePath(business)}/products`, {
+      method: "POST",
+      json: payload,
+    });
+  }
+
   return normalizeProduct(extractResourceByKeys<unknown>(raw, ["product"]));
 }
 
@@ -402,10 +446,23 @@ export async function updateProduct(
   productId: Id,
   input: UpdateProductInput
 ): Promise<CatalogProduct> {
-  const raw = await apiFetch<unknown>(`${businessBasePath(business)}/products/${encodeId(productId)}`, {
-    method: "PATCH",
-    json: productPayload(input),
-  });
+  const payload = productPayload(input);
+  let raw: unknown;
+
+  if (input.imageFile instanceof File) {
+    const formData = payloadToFormData(payload);
+    formData.append("image", input.imageFile);
+    raw = await apiFetch<unknown>(`${businessBasePath(business)}/products/${encodeId(productId)}`, {
+      method: "PATCH",
+      body: formData,
+    });
+  } else {
+    raw = await apiFetch<unknown>(`${businessBasePath(business)}/products/${encodeId(productId)}`, {
+      method: "PATCH",
+      json: payload,
+    });
+  }
+
   return normalizeProduct(extractResourceByKeys<unknown>(raw, ["product"]));
 }
 

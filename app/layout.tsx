@@ -29,10 +29,9 @@ export const metadata: Metadata = { title: "POS Pro" };
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="fr">
-      <body className="bg-slate-50">
+      <body className="app-shell-bg">
         <Providers>{children}</Providers>
       </body>
     </html>
   );
 }
-

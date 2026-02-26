@@ -87,3 +87,30 @@ export async function apiFetch<T>(path: string, options: FetchOptions = {}): Pro
   if (!res.ok) throw new ApiError(res.status, body);
   return body as T;
 }
+
+export async function apiFetchBlob(path: string, options: FetchOptions = {}): Promise<Blob> {
+  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  const token = options.token ?? getToken();
+
+  const headers: HeadersInit = {
+    Accept: "*/*",
+    ...(options.json ? { "Content-Type": "application/json" } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(options.headers || {}),
+  };
+
+  const res = await fetch(url, {
+    ...options,
+    headers,
+    body: options.json ? JSON.stringify(options.json) : options.body,
+  });
+
+  if (!res.ok) {
+    const contentType = res.headers.get("content-type") || "";
+    const isJson = contentType.includes("application/json");
+    const body: unknown = isJson ? await res.json().catch(() => null) : await res.text().catch(() => null);
+    throw new ApiError(res.status, body);
+  }
+
+  return res.blob();
+}

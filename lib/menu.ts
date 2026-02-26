@@ -79,7 +79,9 @@ export const menuGroups: MenuGroup[] = [
   {
     title: "Administration",
     items: [
+      { label: "My Business", href: (b) => `/${b}/business`, icon: "fa-solid fa-building", permission: "settings.manage" },
       { label: "Utilisateurs", href: (b) => `/${b}/users`, icon: "fa-solid fa-user-gear", permission: "users.manage" },
+      { label: "Employes", href: (b) => `/${b}/employees`, icon: "fa-solid fa-id-badge", permission: "users.manage" },
       { label: "Rôles & permissions", href: (b) => `/${b}/roles`, icon: "fa-solid fa-shield-halved", permission: "roles.manage" },
       { label: "Business / Branches", href: (b) => `/${b}/business`, icon: "fa-solid fa-sitemap", permission: "business.manage" },
       { label: "Paramètres", href: (b) => `/${b}/settings`, icon: "fa-solid fa-gear", permission: "settings.manage" },

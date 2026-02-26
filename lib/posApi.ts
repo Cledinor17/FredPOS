@@ -54,6 +54,84 @@ export type PosCheckoutResult = {
   createdAt: string;
 };
 
+export type PosSaleHistoryItem = {
+  id: string;
+  receiptNo: string;
+  status: string;
+  createdAt: string;
+  issueDate: string | null;
+  createdBy: string | null;
+  createdByName: string | null;
+  createdByEmail: string | null;
+  voidedAt: string | null;
+  voidedBy: string | null;
+  voidedByName: string | null;
+  voidedByEmail: string | null;
+  customerName: string;
+  itemsCount: number;
+  total: number;
+  amountPaid: number;
+  balanceDue: number;
+  paymentMethod: string | null;
+  paidTotal: number;
+  refundedTotal: number;
+  notes: string | null;
+  canRefund: boolean;
+  canVoid: boolean;
+};
+
+export type PosSaleHistoryParams = {
+  page?: number;
+  perPage?: number;
+  q?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+};
+
+export type PosSaleHistoryResult = {
+  items: PosSaleHistoryItem[];
+  currentPage: number;
+  perPage: number;
+  total: number;
+  lastPage: number;
+};
+
+export type ListAllPosSalesOptions = {
+  perPage?: number;
+  maxPages?: number;
+};
+
+export type PosSaleDetailItem = {
+  id: string;
+  productId: string | null;
+  name: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+  taxRate: number;
+  taxAmount: number;
+  lineTotal: number;
+};
+
+export type PosSaleDetailPayment = {
+  id: string;
+  kind: string;
+  method: string;
+  amount: number;
+  paidAt: string | null;
+  reference: string | null;
+  notes: string | null;
+  receivedBy: string | null;
+  receivedByName: string | null;
+  receivedByEmail: string | null;
+};
+
+export type PosSaleDetail = PosSaleHistoryItem & {
+  items: PosSaleDetailItem[];
+  payments: PosSaleDetailPayment[];
+};
+
 type Dict = Record<string, unknown>;
 
 function isObject(value: unknown): value is Dict {
@@ -61,7 +139,10 @@ function isObject(value: unknown): value is Dict {
 }
 
 function toString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "bigint") return value.toString();
+  return fallback;
 }
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -193,6 +274,115 @@ function normalizeCheckoutResult(raw: unknown): PosCheckoutResult {
   return { saleId, receiptNo, createdAt };
 }
 
+function normalizeSaleHistoryItem(raw: unknown): PosSaleHistoryItem {
+  const resource = getResource(raw, ["sale", "invoice"]);
+  const obj = isObject(resource) ? resource : {};
+
+  const total = toNumber(obj.total, 0);
+  const amountPaid = toNumber(obj.amount_paid ?? obj.amountPaid, 0);
+  const fallbackBalance = Math.max(0, total - amountPaid);
+  const balanceDue = toNumber(obj.balance_due ?? obj.balanceDue, fallbackBalance);
+  const status = toString(obj.status, "issued");
+
+  return {
+    id: toString(obj.id ?? obj.sale_id ?? obj.invoice_id, `S-${Date.now()}`),
+    receiptNo: toString(
+      obj.receipt_no ?? obj.receiptNo ?? obj.number ?? obj.invoice_no,
+      `TKT-${Date.now()}`
+    ),
+    status,
+    createdAt: toString(obj.created_at ?? obj.createdAt ?? obj.issue_date, new Date().toISOString()),
+    issueDate: toString(obj.issue_date ?? obj.issueDate, "") || null,
+    createdBy: toString(obj.created_by ?? obj.createdBy ?? obj.cashier_id ?? obj.cashierId, "") || null,
+    createdByName:
+      toString(obj.created_by_name ?? obj.createdByName ?? obj.cashier_name ?? obj.cashierName, "") || null,
+    createdByEmail: toString(obj.created_by_email ?? obj.createdByEmail, "") || null,
+    voidedAt: toString(obj.voided_at ?? obj.voidedAt, "") || null,
+    voidedBy: toString(obj.voided_by ?? obj.voidedBy, "") || null,
+    voidedByName: toString(obj.voided_by_name ?? obj.voidedByName, "") || null,
+    voidedByEmail: toString(obj.voided_by_email ?? obj.voidedByEmail, "") || null,
+    customerName: toString(
+      obj.customer_name ?? obj.customerName ?? obj.customer,
+      "Client comptoir"
+    ),
+    itemsCount: toNumber(obj.items_count ?? obj.itemsCount, 0),
+    total,
+    amountPaid,
+    balanceDue,
+    paymentMethod: toString(obj.payment_method ?? obj.paymentMethod, "") || null,
+    paidTotal: toNumber(obj.paid_total ?? obj.paidTotal, amountPaid),
+    refundedTotal: toNumber(obj.refunded_total ?? obj.refundedTotal, 0),
+    notes: toString(obj.notes, "") || null,
+    canRefund: toBool(obj.can_refund ?? obj.canRefund, status !== "void" && amountPaid > 0),
+    canVoid: toBool(obj.can_void ?? obj.canVoid, status !== "void" && amountPaid <= 0),
+  };
+}
+
+function normalizeSaleHistoryResult(raw: unknown): PosSaleHistoryResult {
+  const items = getCollection(raw).map(normalizeSaleHistoryItem);
+
+  let currentPage = 1;
+  let perPage = items.length;
+  let total = items.length;
+  let lastPage = 1;
+
+  if (isObject(raw) && isObject(raw.meta)) {
+    const meta = raw.meta;
+    currentPage = Math.max(1, Math.trunc(toNumber(meta.current_page ?? meta.currentPage, 1)));
+    perPage = Math.max(1, Math.trunc(toNumber(meta.per_page ?? meta.perPage, items.length || 20)));
+    total = Math.max(0, Math.trunc(toNumber(meta.total, items.length)));
+    lastPage = Math.max(1, Math.trunc(toNumber(meta.last_page ?? meta.lastPage, 1)));
+  }
+
+  return { items, currentPage, perPage, total, lastPage };
+}
+
+function normalizeSaleDetailItem(raw: unknown): PosSaleDetailItem {
+  const obj = isObject(raw) ? raw : {};
+  return {
+    id: toString(obj.id, `L-${Date.now()}`),
+    productId: toString(obj.product_id ?? obj.productId, "") || null,
+    name: toString(obj.name, "Article"),
+    sku: toString(obj.sku, ""),
+    quantity: toNumber(obj.quantity ?? obj.qty, 0),
+    unitPrice: toNumber(obj.unit_price ?? obj.unitPrice ?? obj.price, 0),
+    taxRate: toNumber(obj.tax_rate ?? obj.taxRate, 0),
+    taxAmount: toNumber(obj.tax_amount ?? obj.taxAmount, 0),
+    lineTotal: toNumber(obj.line_total ?? obj.lineTotal ?? obj.total, 0),
+  };
+}
+
+function normalizeSaleDetailPayment(raw: unknown): PosSaleDetailPayment {
+  const obj = isObject(raw) ? raw : {};
+  return {
+    id: toString(obj.id, `P-${Date.now()}`),
+    kind: toString(obj.kind, "payment"),
+    method: toString(obj.method, ""),
+    amount: toNumber(obj.amount, 0),
+    paidAt: toString(obj.paid_at ?? obj.paidAt, "") || null,
+    reference: toString(obj.reference, "") || null,
+    notes: toString(obj.notes, "") || null,
+    receivedBy: toString(obj.received_by ?? obj.receivedBy, "") || null,
+    receivedByName: toString(obj.received_by_name ?? obj.receivedByName, "") || null,
+    receivedByEmail: toString(obj.received_by_email ?? obj.receivedByEmail, "") || null,
+  };
+}
+
+function normalizeSaleDetail(raw: unknown): PosSaleDetail {
+  const saleResource = getResource(raw, ["sale", "invoice"]);
+  const saleObj = isObject(saleResource) ? saleResource : {};
+  const base = normalizeSaleHistoryItem(saleObj);
+
+  const itemsRaw = Array.isArray(saleObj.items) ? saleObj.items : [];
+  const paymentsRaw = Array.isArray(saleObj.payments) ? saleObj.payments : [];
+
+  return {
+    ...base,
+    items: itemsRaw.map(normalizeSaleDetailItem),
+    payments: paymentsRaw.map(normalizeSaleDetailPayment),
+  };
+}
+
 function paymentMethodPaths(business: string): string[] {
   const base = basePath(business);
   return [`${base}/pos/payment-methods`, `${base}/payment-methods`, `${base}/settings/payment-methods`];
@@ -206,6 +396,10 @@ function parkedCartPaths(business: string): string[] {
 function salePaths(business: string): string[] {
   const base = basePath(business);
   return [`${base}/sales`, `${base}/pos/sales`, `${base}/checkout`];
+}
+
+function salesBasePath(business: string): string {
+  return `${basePath(business)}/sales`;
 }
 
 export async function getPosPaymentMethods(
@@ -302,4 +496,89 @@ export async function checkoutPosSale(
   const raw = await tryApiFetch<unknown>(salePaths(business), { method: "POST", json: payload });
   if (raw === null) return null;
   return normalizeCheckoutResult(raw);
+}
+
+export async function listPosSales(
+  business: string,
+  params: PosSaleHistoryParams = {}
+): Promise<PosSaleHistoryResult> {
+  const qp = new URLSearchParams();
+
+  if (params.page && params.page > 0) qp.set("page", String(params.page));
+  if (params.perPage && params.perPage > 0) qp.set("per_page", String(params.perPage));
+  if (params.q && params.q.trim().length > 0) qp.set("q", params.q.trim());
+  if (params.status && params.status.trim().length > 0) qp.set("status", params.status.trim());
+  if (params.from && params.from.trim().length > 0) qp.set("from", params.from.trim());
+  if (params.to && params.to.trim().length > 0) qp.set("to", params.to.trim());
+
+  const queryString = qp.toString();
+  const path = queryString.length > 0 ? `${salesBasePath(business)}?${queryString}` : salesBasePath(business);
+  const raw = await apiFetch<unknown>(path);
+  return normalizeSaleHistoryResult(raw);
+}
+
+export async function listAllPosSales(
+  business: string,
+  params: Omit<PosSaleHistoryParams, "page" | "perPage"> = {},
+  options: ListAllPosSalesOptions = {}
+): Promise<PosSaleHistoryItem[]> {
+  const perPage = Math.max(1, Math.min(Math.trunc(options.perPage ?? 100), 100));
+  const maxPages =
+    typeof options.maxPages === "number" && Number.isFinite(options.maxPages) && options.maxPages > 0
+      ? Math.trunc(options.maxPages)
+      : Number.MAX_SAFE_INTEGER;
+
+  const firstPage = await listPosSales(business, {
+    ...params,
+    page: 1,
+    perPage,
+  });
+
+  if (firstPage.lastPage <= 1 || maxPages <= 1) {
+    return firstPage.items;
+  }
+
+  const targetLastPage = Math.min(firstPage.lastPage, maxPages);
+  const requests: Array<Promise<PosSaleHistoryResult>> = [];
+  for (let page = 2; page <= targetLastPage; page += 1) {
+    requests.push(
+      listPosSales(business, {
+        ...params,
+        page,
+        perPage,
+      })
+    );
+  }
+
+  const restPages = await Promise.all(requests);
+  return firstPage.items.concat(...restPages.map((pageResult) => pageResult.items));
+}
+
+export async function refundPosSale(
+  business: string,
+  saleId: string,
+  input: { amount: number; method?: string; reference?: string; notes?: string }
+): Promise<PosSaleHistoryItem> {
+  const raw = await apiFetch<unknown>(`${salesBasePath(business)}/${encodeURIComponent(saleId)}/refund`, {
+    method: "POST",
+    json: {
+      amount: input.amount,
+      method: input.method ?? "cash",
+      reference: input.reference ?? null,
+      notes: input.notes ?? null,
+    },
+  });
+  return normalizeSaleHistoryItem(getResource(raw, ["sale", "invoice"]));
+}
+
+export async function voidPosSale(business: string, saleId: string): Promise<PosSaleHistoryItem> {
+  const raw = await apiFetch<unknown>(`${salesBasePath(business)}/${encodeURIComponent(saleId)}/void`, {
+    method: "POST",
+  });
+  return normalizeSaleHistoryItem(getResource(raw, ["sale", "invoice"]));
+}
+
+export async function getPosSaleDetail(business: string, saleId: string): Promise<PosSaleDetail> {
+  const raw = await apiFetch<unknown>(`${salesBasePath(business)}/${encodeURIComponent(saleId)}`);
+  return normalizeSaleDetail(raw);
 }
